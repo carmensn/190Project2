@@ -439,6 +439,8 @@ private:
 	uvec2 _renderTargetSize;
 	uvec2 _mirrorSize;
 
+	int viewSelector = 0;
+
 public:
 
 	RiftApp() {
@@ -557,7 +559,20 @@ protected:
 			const auto& vp = _sceneLayer.Viewport[eye];
 			glViewport(vp.Pos.x, vp.Pos.y, vp.Size.w, vp.Size.h);
 			_sceneLayer.RenderPose[eye] = eyePoses[eye];
-			renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));  // cse190: this is for normal stereo rendering
+			switch (viewSelector % 4) {
+			case 0:
+				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
+				break;
+			case 1:
+				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[ovrEye_Left]));
+				break;
+			case 2:
+				if (eye == ovrEye_Left) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
+				break;
+			default:
+				if (eye == ovrEye_Right) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
+			}
+			//renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));  // cse190: this is for normal stereo rendering
 																		   //			renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[ovrEye_Left]));  // cse190: use eyePoses[ovrEye_Left] to render one eye's view to both eyes = monoscopic view
 																		   //			if (eye==ovrEye_Left) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));  // cse190: this is how to render to only one eye
 
@@ -581,11 +596,14 @@ protected:
 		ovrInputState inputState;
 		if (OVR_SUCCESS(ovr_GetInputState(_session, ovrControllerType_Touch, &inputState)))
 		{
-			if (inputState.HandTrigger[ovrHand_Right] > 0.5f)   cerr << "right middle trigger pressed" << endl;
+			/*if (inputState.HandTrigger[ovrHand_Right] > 0.5f)   cerr << "right middle trigger pressed" << endl;
 			if (inputState.IndexTrigger[ovrHand_Right] > 0.5f)	cerr << "right index trigger pressed" << endl;
 			if (inputState.HandTrigger[ovrHand_Left] > 0.5f)    cerr << "left middle trigger pressed" << endl;
 			if (inputState.IndexTrigger[ovrHand_Left] > 0.5f)	cerr << "left index trigger pressed" << endl;
-			if (inputState.Buttons>0) cerr << "Botton state:" << inputState.Buttons << endl;
+			if (inputState.Buttons>0) cerr << "Botton state:" << inputState.Buttons << endl;*/
+			if (inputState.Buttons & ovrButton_A) {
+				viewSelector++;
+			}
 			// cse190: no need to print the above messages
 		}
 	}
