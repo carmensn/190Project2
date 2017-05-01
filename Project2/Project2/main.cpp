@@ -560,22 +560,18 @@ protected:
 			glViewport(vp.Pos.x, vp.Pos.y, vp.Size.w, vp.Size.h);
 			_sceneLayer.RenderPose[eye] = eyePoses[eye];
 			switch (viewSelector % 4) {
-			case 0:
+			case 0:		//Stereo
 				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
 				break;
-			case 1:
+			case 1:		//Mono
 				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[ovrEye_Left]));
 				break;
-			case 2:
+			case 2:		//Left only
 				if (eye == ovrEye_Left) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
 				break;
-			default:
+			default:	//Right only
 				if (eye == ovrEye_Right) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
 			}
-			//renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));  // cse190: this is for normal stereo rendering
-																		   //			renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[ovrEye_Left]));  // cse190: use eyePoses[ovrEye_Left] to render one eye's view to both eyes = monoscopic view
-																		   //			if (eye==ovrEye_Left) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));  // cse190: this is how to render to only one eye
-
 		});
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -767,7 +763,7 @@ public:
 		prog.Use();
 		Uniform<mat4>(prog, "ProjectionMatrix").Set(projection);
 		Uniform<mat4>(prog, "CameraMatrix").Set(modelview);  // cse190: this is default for normal rendering with head tracking
-															 //		Uniform<mat4>(prog, "CameraMatrix").Set(identity);   // cse190: changing modelview to identity freezes scene and head motion
+		//Uniform<mat4>(prog, "CameraMatrix").Set(identity);   // cse190: changing modelview to identity freezes scene and head motion
 		vao.Bind();
 		cube.Draw(instanceCount);
 	}
