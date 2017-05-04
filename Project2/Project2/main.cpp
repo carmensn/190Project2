@@ -607,6 +607,71 @@ protected:
 	virtual void renderScene(const glm::mat4 & projection, const glm::mat4 & headPose) = 0;
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////
+//										LOAD PPM
+///////////////////////////////////////////////////////////////////////////////////////////
+
+//! Load a ppm file from disk.
+// @input filename The location of the PPM file.  If the file is not found, an error message
+//		will be printed and this function will return 0
+// @input width This will be modified to contain the width of the loaded image, or 0 if file not found
+// @input height This will be modified to contain the height of the loaded image, or 0 if file not found
+//
+// @return Returns the RGB pixel data as interleaved unsigned chars (R0 G0 B0 R1 G1 B1 R2 G2 B2 .... etc) or 0 if an error ocured
+
+unsigned char* loadPPM(const char* filename, int& width, int& height)
+{
+	const int BUFSIZE = 128;
+	FILE* fp;
+	unsigned int read;
+	unsigned char* rawData;
+	char buf[3][BUFSIZE];
+	char* retval_fgets;
+	size_t retval_sscanf;
+
+	if ((fp = fopen(filename, "rb")) == NULL)
+	{
+		std::cerr << "error reading ppm file, could not locate " << filename << std::endl;
+		width = 0;
+		height = 0;
+		return 0;
+	}
+
+	// Read magic number:
+	retval_fgets = fgets(buf[0], BUFSIZE, fp);
+
+	// Read width and height:
+	do
+	{
+		retval_fgets = fgets(buf[0], BUFSIZE, fp);
+	} while (buf[0][0] == '#');
+	retval_sscanf = sscanf(buf[0], "%s %s", buf[1], buf[2]);
+	width = atoi(buf[1]);
+	height = atoi(buf[2]);
+
+	// Read maxval:
+	do
+	{
+		retval_fgets = fgets(buf[0], BUFSIZE, fp);
+	} while (buf[0][0] == '#');
+
+	// Read image data:
+	rawData = new unsigned char[width * height * 3];
+	read = fread(rawData, width * height * 3, 1, fp);
+	fclose(fp);
+	if (read != 1)
+	{
+		std::cerr << "error parsing ppm file, incomplete data" << std::endl;
+		delete[] rawData;
+		width = 0;
+		height = 0;
+
+		return 0;
+	}
+
+	return rawData;
+}
+
 //////////////////////////////////////////////////////////////////////
 //
 // The remainder of this code is specific to the scene we want to 
@@ -697,8 +762,12 @@ struct ColorCubeScene {
 	GLuint instanceCount;
 	oglplus::Buffer instances;
 
-	// VBOs for the cube's vertices and normals
+	unsigned char * imageRGBA; 
+	int imgWidth;
+	int imgHeight;
 
+	// VBOs for the cube's vertices and normals
+	GLuint m_iTexture = 0;
 	const unsigned int GRID_SIZE{ 5 };
 
 public:
@@ -730,7 +799,7 @@ public:
 		// Create a cube of cubes
 		{
 			std::vector<mat4> instance_positions;
-			for (unsigned int z = 0; z < GRID_SIZE; ++z) {
+			/*for (unsigned int z = 0; z < GRID_SIZE; ++z) {
 				for (unsigned int y = 0; y < GRID_SIZE; ++y) {
 					for (unsigned int x = 0; x < GRID_SIZE; ++x) {
 						int xpos = (x - (GRID_SIZE / 2)) * 2;
@@ -738,13 +807,17 @@ public:
 						int zpos = (z - (GRID_SIZE / 2)) * 2;
 						vec3 relativePosition = vec3(xpos, ypos, zpos);
 						if (relativePosition == vec3(0)) {
-							continue;
+						continue;
 						}
 						instance_positions.push_back(glm::translate(glm::mat4(1.0f), relativePosition));
 					}
 				}
-			}
+			}*/
 
+			vec3 relativePosition = vec3(0, 0, -2);
+
+			instance_positions.push_back(glm::translate(glm::scale(glm::mat4(1.0), vec3 (0.35)), relativePosition));
+			
 			Context::Bound(Buffer::Target::Array, instances).Data(instance_positions);
 			instanceCount = (GLuint)instance_positions.size();
 			int stride = sizeof(mat4);
@@ -756,6 +829,48 @@ public:
 				instance_attr.Enable();
 			}
 		}
+
+		imageRGBA = loadPPM("../Project2-Assets/vr_test_pattern.ppm", imgWidth, imgHeight);
+		printf("%s\n",imageRGBA);
+		setupTextureMaps();
+	}
+
+
+	////////////////////////////////////////////////////////////////////
+	//		SETUP TEXTURE MAPS
+	/////////////////////////////////////////////////////////////////////
+	bool setupTextureMaps()
+	{
+		glGenTextures(1, &m_iTexture);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, m_iTexture);
+
+		//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imgWidth, imgHeight,
+		//	0, GL_RGB, GL_UNSIGNED_BYTE, imageRGBA);
+		for (int i = 0; i < 6; i++) {
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, imgWidth, imgHeight,
+					0, GL_RGB, GL_UNSIGNED_BYTE, imageRGBA);
+		}
+
+		glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+
+		/*glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);*/
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+		GLfloat fLargest;
+		glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &fLargest);
+		glTexParameterf(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_ANISOTROPY_EXT, fLargest);
+
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+		return (m_iTexture != 0);
 	}
 
 	void render(const mat4 & projection, const mat4 & modelview) {
@@ -764,6 +879,8 @@ public:
 		Uniform<mat4>(prog, "ProjectionMatrix").Set(projection);
 		Uniform<mat4>(prog, "CameraMatrix").Set(modelview);  // cse190: this is default for normal rendering with head tracking
 		//Uniform<mat4>(prog, "CameraMatrix").Set(identity);   // cse190: changing modelview to identity freezes scene and head motion
+		//setupTextureMaps();
+		glBindTexture(GL_TEXTURE_CUBE_MAP, m_iTexture);
 		vao.Bind();
 		cube.Draw(instanceCount);
 	}
