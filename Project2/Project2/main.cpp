@@ -24,6 +24,9 @@ limitations under the License.
 #include <algorithm>
 #include <Windows.h>
 
+#include "shader.h"
+#include "Box.h"
+
 #define __STDC_FORMAT_MACROS 1
 
 #define FAIL(X) throw std::runtime_error(X)
@@ -441,6 +444,9 @@ private:
 
 	int viewSelector = 0;
 
+	vector<char*> modes = { "Stereo", "Mono", "Left only", "Right only" };
+	bool A_down = false;
+
 public:
 
 	RiftApp() {
@@ -559,7 +565,7 @@ protected:
 			const auto& vp = _sceneLayer.Viewport[eye];
 			glViewport(vp.Pos.x, vp.Pos.y, vp.Size.w, vp.Size.h);
 			_sceneLayer.RenderPose[eye] = eyePoses[eye];
-			switch (viewSelector % 4) {
+			switch (viewSelector) {
 			case 0:		//Stereo
 				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
 				break;
@@ -572,6 +578,7 @@ protected:
 			default:	//Right only
 				if (eye == ovrEye_Right) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
 			}
+
 		});
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -597,8 +604,14 @@ protected:
 			if (inputState.HandTrigger[ovrHand_Left] > 0.5f)    cerr << "left middle trigger pressed" << endl;
 			if (inputState.IndexTrigger[ovrHand_Left] > 0.5f)	cerr << "left index trigger pressed" << endl;
 			if (inputState.Buttons>0) cerr << "Botton state:" << inputState.Buttons << endl;*/
-			if (inputState.Buttons & ovrButton_A) {
-				viewSelector++;
+
+			if (inputState.Buttons & ovrButton_A & !A_down) {
+				A_down = true;
+				viewSelector = (viewSelector + 1)%4;	
+				printf("Viewmode: %d - %s\n", viewSelector, modes[viewSelector]);
+			}
+			if (!(inputState.Buttons & ovrButton_A)) {
+				A_down = false;
 			}
 			// cse190: no need to print the above messages
 		}
@@ -705,7 +718,6 @@ unsigned char* loadPPM(const char* filename, int& width, int& height)
 #pragma warning( default : 4068 4244 4267 4065)
 
 
-
 namespace Attribute {
 	enum {
 		Position = 0,
@@ -717,41 +729,6 @@ namespace Attribute {
 	};
 }
 
-static const char * VERTEX_SHADER = R"SHADER(
-#version 410 core
-
-uniform mat4 ProjectionMatrix = mat4(1);
-uniform mat4 CameraMatrix = mat4(1);
-
-layout(location = 0) in vec4 Position;
-layout(location = 2) in vec3 Normal;
-layout(location = 5) in mat4 InstanceTransform;
-
-out vec3 vertNormal;
-
-void main(void) {
-   mat4 ViewXfm = CameraMatrix * InstanceTransform;
-   //mat4 ViewXfm = CameraMatrix;
-   vertNormal = Normal;
-   gl_Position = ProjectionMatrix * ViewXfm * Position;
-}
-)SHADER";
-
-static const char * FRAGMENT_SHADER = R"SHADER(
-#version 410 core
-
-in vec3 vertNormal;
-out vec4 fragColor;
-
-void main(void) {
-    vec3 color = vertNormal;
-    if (!all(equal(color, abs(color)))) {
-        color = vec3(1.0) - abs(color);
-    }
-    fragColor = vec4(color, 1.0);
-}
-)SHADER";
-
 // a class for encapsulating building and rendering an RGB cube
 struct ColorCubeScene {
 
@@ -762,127 +739,44 @@ struct ColorCubeScene {
 	GLuint instanceCount;
 	oglplus::Buffer instances;
 
-	unsigned char * imageRGBA; 
+	GLuint shaderProg;
+	GLuint texture_box;
+	
+	unsigned char * imgData; 
 	int imgWidth;
 	int imgHeight;
 
+	Box * box;
+
 	// VBOs for the cube's vertices and normals
-	GLuint m_iTexture = 0;
-	const unsigned int GRID_SIZE{ 5 };
+	//const unsigned int GRID_SIZE{ 5 };
 
 public:
 	ColorCubeScene() : cube({ "Position", "Normal" }, oglplus::shapes::Cube()) {
-		using namespace oglplus;
-		try {
-			// attach the shaders to the program
-			prog.AttachShader(
-				FragmentShader()
-				.Source(GLSLSource(String(FRAGMENT_SHADER)))
-				.Compile()
-			);
-			prog.AttachShader(
-				VertexShader()
-				.Source(GLSLSource(String(VERTEX_SHADER)))
-				.Compile()
-			);
-			prog.Link();
-		}
-		catch (ProgramBuildError & err) {
-			FAIL((const char*)err.what());
-		}
+		shaderProg = LoadShaders("shader.vert", "shader.frag");
+		box = new Box();
 
-		// link and use it
-		prog.Use();
+		//Acquire the width, height, and data
+		imgData = loadPPM("../Project2-Assets/vr_test_pattern.ppm", imgWidth, imgHeight);
+		box->loadBoxTexture(imgData, imgWidth, imgHeight);
 
-		vao = cube.VAOForProgram(prog);
-		vao.Bind();
-		// Create a cube of cubes
-		{
-			std::vector<mat4> instance_positions;
-			/*for (unsigned int z = 0; z < GRID_SIZE; ++z) {
-				for (unsigned int y = 0; y < GRID_SIZE; ++y) {
-					for (unsigned int x = 0; x < GRID_SIZE; ++x) {
-						int xpos = (x - (GRID_SIZE / 2)) * 2;
-						int ypos = (y - (GRID_SIZE / 2)) * 2;
-						int zpos = (z - (GRID_SIZE / 2)) * 2;
-						vec3 relativePosition = vec3(xpos, ypos, zpos);
-						if (relativePosition == vec3(0)) {
-						continue;
-						}
-						instance_positions.push_back(glm::translate(glm::mat4(1.0f), relativePosition));
-					}
-				}
-			}*/
-
-			vec3 relativePosition = vec3(0, 0, -2);
-
-			instance_positions.push_back(glm::translate(glm::scale(glm::mat4(1.0), vec3 (0.35)), relativePosition));
-			
-			Context::Bound(Buffer::Target::Array, instances).Data(instance_positions);
-			instanceCount = (GLuint)instance_positions.size();
-			int stride = sizeof(mat4);
-			for (int i = 0; i < 4; ++i) {
-				VertexArrayAttrib instance_attr(prog, Attribute::InstanceTransform + i);
-				size_t offset = sizeof(vec4) * i;
-				instance_attr.Pointer(4, DataType::Float, false, stride, (void*)offset);
-				instance_attr.Divisor(1);
-				instance_attr.Enable();
-			}
-		}
-
-		imageRGBA = loadPPM("../Project2-Assets/vr_test_pattern.ppm", imgWidth, imgHeight);
-		printf("%s\n",imageRGBA);
-		setupTextureMaps();
 	}
 
+	void render(const mat4 & projection, const mat4 & modelview, ovrSession session) {
 
-	////////////////////////////////////////////////////////////////////
-	//		SETUP TEXTURE MAPS
-	/////////////////////////////////////////////////////////////////////
-	bool setupTextureMaps()
-	{
-		glGenTextures(1, &m_iTexture);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_CUBE_MAP, m_iTexture);
+		glUseProgram(shaderProg);
+		GLuint uProjection = glGetUniformLocation(shaderProg, "projection");
+		GLuint uModelview = glGetUniformLocation(shaderProg, "modelview");
+		GLuint uTransform = glGetUniformLocation(shaderProg, "transform");
 
-		//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imgWidth, imgHeight,
-		//	0, GL_RGB, GL_UNSIGNED_BYTE, imageRGBA);
-		for (int i = 0; i < 6; i++) {
-			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, imgWidth, imgHeight,
-					0, GL_RGB, GL_UNSIGNED_BYTE, imageRGBA);
-		}
+		glUniformMatrix4fv(uProjection, 1, GL_FALSE, (&projection[0][0]));
+		glUniformMatrix4fv(uModelview, 1, GL_FALSE, &(modelview[0][0]));
 
-		glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
-
-		/*glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);*/
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-
-		GLfloat fLargest;
-		glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &fLargest);
-		glTexParameterf(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_ANISOTROPY_EXT, fLargest);
-
-		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-
-		return (m_iTexture != 0);
-	}
-
-	void render(const mat4 & projection, const mat4 & modelview) {
-		using namespace oglplus;
-		prog.Use();
-		Uniform<mat4>(prog, "ProjectionMatrix").Set(projection);
-		Uniform<mat4>(prog, "CameraMatrix").Set(modelview);  // cse190: this is default for normal rendering with head tracking
-		//Uniform<mat4>(prog, "CameraMatrix").Set(identity);   // cse190: changing modelview to identity freezes scene and head motion
-		//setupTextureMaps();
-		glBindTexture(GL_TEXTURE_CUBE_MAP, m_iTexture);
-		vao.Bind();
-		cube.Draw(instanceCount);
+		glm::mat4 boxtransform;
+		boxtransform = glm::translate(boxtransform, glm::vec3(0.0f, 0.f, -1.0f));
+		boxtransform = glm::scale(boxtransform, glm::vec3(0.2f));		
+		glUniformMatrix4fv(uTransform, 1, GL_FALSE, &boxtransform[0][0]);
+		box->draw(shaderProg);
 	}
 };
 
@@ -908,7 +802,7 @@ protected:
 	}
 
 	void renderScene(const glm::mat4 & projection, const glm::mat4 & headPose) override {
-		cubeScene->render(projection, glm::inverse(headPose));
+		cubeScene->render(projection, glm::inverse(headPose), _session);
 	}
 };
 
