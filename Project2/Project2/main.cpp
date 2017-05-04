@@ -445,6 +445,8 @@ private:
 	int viewSelector = 0;
 	int trackingSelector = 0;
 
+	ovrPosef lastPoses[2];
+
 	vector<char*> viewmodes = { "Stereo", "Mono", "Left only", "Right only" };
 	vector<char*> trackmodes = { "No Tracking", "Orientation", "Position", "Full Tracking" };
 	bool A_down = false;
@@ -560,6 +562,20 @@ protected:
 		//DO HEAD TRACKING HERE
 		//eyePoses has Orientation (quatf) and Position (Vector3f)
 		//Store position and orientation then freeze depending on tracking mode
+		switch (trackingSelector) {
+		case 1:		//No tracking
+			eyePoses[0] = lastPoses[0];
+			eyePoses[1] = lastPoses[1];
+			break;
+		case 2:		//Position only
+			eyePoses[0].Orientation = lastPoses[0].Orientation;
+			eyePoses[1].Orientation = lastPoses[1].Orientation;
+			break;
+		case 3:		//Orientation only
+			eyePoses[0].Position = lastPoses[0].Position;
+			eyePoses[1].Position = lastPoses[1].Position;
+		//Else normal tracking
+		}
 		
 		int curIndex;
 		ovr_GetTextureSwapChainCurrentIndex(_session, _eyeTexture, &curIndex);
@@ -625,6 +641,9 @@ protected:
 			// On B press, change head tracking mode
 			if (inputState.Buttons & ovrButton_B & !B_down) {
 				B_down = true;
+				if (trackingSelector == 0) {
+					ovr_GetEyePoses(_session, frame, true, _viewScaleDesc.HmdToEyeOffset, lastPoses, &_sceneLayer.SensorSampleTime);
+				}
 				trackingSelector = (trackingSelector + 1)%4;	
 				printf("Tracking mode: %d - %s\n", trackingSelector, trackmodes[trackingSelector]);
 			}
