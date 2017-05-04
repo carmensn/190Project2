@@ -778,12 +778,14 @@ struct ColorCubeScene {
 
 	GLuint shaderProg;
 	GLuint texture_box;
+	GLuint texture_skybox;
 	
 	unsigned char * imgData; 
 	int imgWidth;
 	int imgHeight;
 
 	Box * box;
+	Box * skybox;
 
 	// VBOs for the cube's vertices and normals
 	//const unsigned int GRID_SIZE{ 5 };
@@ -792,30 +794,48 @@ public:
 	ColorCubeScene() : cube({ "Position", "Normal" }, oglplus::shapes::Cube()) {
 		shaderProg = LoadShaders("shader.vert", "shader.frag");
 		box = new Box();
+		skybox = new Box();
 
 		//Acquire the width, height, and data
-		imgData = loadPPM("../Project2-Assets/vr_test_pattern.ppm", imgWidth, imgHeight);
-		box->loadBoxTexture(imgData, imgWidth, imgHeight);
 
+		//Load calibration cube textures
+		imgData = loadPPM("../Project2-Assets/vr_test_pattern.ppm", imgWidth, imgHeight);
+		vector<unsigned char*> cubeDataVec(6, imgData);
+		texture_box = box->loadBoxTexture(cubeDataVec, imgWidth, imgHeight);
+
+		//Load skybox textures
+		vector<unsigned char*> skyboxDataVec;
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/px.ppm", imgWidth, imgHeight));
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/nx.ppm", imgWidth, imgHeight));
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/py.ppm", imgWidth, imgHeight));
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/ny.ppm", imgWidth, imgHeight));
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/nz.ppm", imgWidth, imgHeight));
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/pz.ppm", imgWidth, imgHeight));
+		texture_skybox = skybox->loadBoxTexture(skyboxDataVec, imgWidth, imgWidth);
 	}
 
 	void render(const mat4 & projection, const mat4 & modelview, ovrSession session) {
 
+		glDepthMask(GL_FALSE);		
 		glUseProgram(shaderProg);
+		//Draw Skybox		
+
 		GLuint uProjection = glGetUniformLocation(shaderProg, "projection");
 		GLuint uModelview = glGetUniformLocation(shaderProg, "modelview");
 		GLuint uTransform = glGetUniformLocation(shaderProg, "transform");
-
 		glUniformMatrix4fv(uProjection, 1, GL_FALSE, (&projection[0][0]));
 		glUniformMatrix4fv(uModelview, 1, GL_FALSE, &(modelview[0][0]));
+		skybox->draw(shaderProg, texture_skybox);
+		glDepthMask(GL_TRUE);
 
 		glm::mat4 boxtransform;
 		boxtransform = glm::translate(boxtransform, glm::vec3(0.0f, 0.f, -1.0f));
 		boxtransform = glm::scale(boxtransform, glm::vec3(0.2f));		
 		glUniformMatrix4fv(uTransform, 1, GL_FALSE, &boxtransform[0][0]);
-		box->draw(shaderProg);
+		box->draw(shaderProg, texture_box);
 	}
 };
+
 
 
 // An example application that renders a simple cube

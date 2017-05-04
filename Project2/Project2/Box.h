@@ -14,6 +14,8 @@
 #endif
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <iostream>
+#include <vector>
 
 class Box
 {
@@ -23,10 +25,10 @@ public:
 
 	glm::mat4 toWorld;
 
-	void draw(GLuint);
+	void draw(GLuint, GLuint);
 	void update();
-	void spin(float);
-	GLuint loadBoxTexture(unsigned char * imgData, int width, int height);
+	//void spin(float);
+	GLuint loadBoxTexture(std::vector<unsigned char *>, int, int);
 
 	// These variables are needed for the shader program
 	GLuint VBO, VAO, EBO;
