@@ -443,9 +443,12 @@ private:
 	uvec2 _mirrorSize;
 
 	int viewSelector = 0;
+	int trackingSelector = 0;
 
-	vector<char*> modes = { "Stereo", "Mono", "Left only", "Right only" };
+	vector<char*> viewmodes = { "Stereo", "Mono", "Left only", "Right only" };
+	vector<char*> trackmodes = { "No Tracking", "Orientation", "Position", "Full Tracking" };
 	bool A_down = false;
+	bool B_down = false;
 
 public:
 
@@ -554,6 +557,10 @@ protected:
 		ovrPosef eyePoses[2];
 		ovr_GetEyePoses(_session, frame, true, _viewScaleDesc.HmdToEyeOffset, eyePoses, &_sceneLayer.SensorSampleTime);
 
+		//DO HEAD TRACKING HERE
+		//eyePoses has Orientation (quatf) and Position (Vector3f)
+		//Store position and orientation then freeze depending on tracking mode
+		
 		int curIndex;
 		ovr_GetTextureSwapChainCurrentIndex(_session, _eyeTexture, &curIndex);
 		GLuint curTexId;
@@ -605,13 +612,24 @@ protected:
 			if (inputState.IndexTrigger[ovrHand_Left] > 0.5f)	cerr << "left index trigger pressed" << endl;
 			if (inputState.Buttons>0) cerr << "Botton state:" << inputState.Buttons << endl;*/
 
+			// On A press, change viewing mode
 			if (inputState.Buttons & ovrButton_A & !A_down) {
 				A_down = true;
 				viewSelector = (viewSelector + 1)%4;	
-				printf("Viewmode: %d - %s\n", viewSelector, modes[viewSelector]);
+				printf("View mode: %d - %s\n", viewSelector, viewmodes[viewSelector]);
 			}
 			if (!(inputState.Buttons & ovrButton_A)) {
 				A_down = false;
+			}
+			
+			// On B press, change head tracking mode
+			if (inputState.Buttons & ovrButton_B & !B_down) {
+				B_down = true;
+				trackingSelector = (trackingSelector + 1)%4;	
+				printf("Tracking mode: %d - %s\n", trackingSelector, trackmodes[trackingSelector]);
+			}
+			if (!(inputState.Buttons & ovrButton_B)) {
+				B_down = false;
 			}
 			// cse190: no need to print the above messages
 		}
