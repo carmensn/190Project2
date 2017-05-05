@@ -1,0 +1,4 @@
+﻿  main.cpp
+\\acsnfs4.ucsd.edu\cifshomes\143\cjtin\190\190project2\project2\project2\main.cpp(737): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+  Project2.vcxproj -> \\acsnfs4.ucsd.edu\CifsHomes\143\cjtin\190\190Project2\Project2\x64\Debug\Project2.exe
+  Project2.vcxproj -> \\acsnfs4.ucsd.edu\CifsHomes\143\cjtin\190\190Project2\Project2\x64\Debug\Project2.pdb (Partial PDB)

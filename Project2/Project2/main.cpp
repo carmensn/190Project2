@@ -444,13 +444,18 @@ private:
 
 	int viewSelector = 0;
 	int trackingSelector = 0;
+	int displaySelector = 0;
 
 	ovrPosef lastPoses[2];
+	float originalIODL;
+	float originalIODR;
 
 	vector<char*> viewmodes = { "Stereo", "Mono", "Left only", "Right only" };
-	vector<char*> trackmodes = { "No Tracking", "Orientation", "Position", "Full Tracking" };
+	vector<char*> trackmodes = { "Full Tracking", "No Tracking", "Position", "Orientation"};
+	vector<char*> displaymodes = { "Calibration", "Panorama", "Both" };
 	bool A_down = false;
 	bool B_down = false;
+	bool X_down = false;
 
 public:
 
@@ -477,6 +482,9 @@ public:
 			_renderTargetSize.y = std::max(_renderTargetSize.y, (uint32_t)eyeSize.h);
 			_renderTargetSize.x += eyeSize.w;
 		});
+		originalIODL = _viewScaleDesc.HmdToEyeOffset[ovrEye_Left].x;
+		originalIODR = _viewScaleDesc.HmdToEyeOffset[ovrEye_Right].x;
+
 		// Make the on screen window 1/4 the resolution of the render target
 		_mirrorSize = _renderTargetSize;
 		_mirrorSize /= 4;
@@ -558,23 +566,22 @@ protected:
 	void draw() final override {
 		ovrPosef eyePoses[2];
 		ovr_GetEyePoses(_session, frame, true, _viewScaleDesc.HmdToEyeOffset, eyePoses, &_sceneLayer.SensorSampleTime);
-
-		//DO HEAD TRACKING HERE
-		//eyePoses has Orientation (quatf) and Position (Vector3f)
-		//Store position and orientation then freeze depending on tracking mode
 		switch (trackingSelector) {
-		case 1:		//No tracking
-			eyePoses[0] = lastPoses[0];
-			eyePoses[1] = lastPoses[1];
+		case 0:		// tracking
+			lastPoses[0] = eyePoses[0];
+			lastPoses[1] = eyePoses[1];
 			break;
 		case 2:		//Position only
-			eyePoses[0].Orientation = lastPoses[0].Orientation;
-			eyePoses[1].Orientation = lastPoses[1].Orientation;
+			lastPoses[0].Position = eyePoses[0].Position;
+			lastPoses[1].Position = eyePoses[1].Position;
 			break;
 		case 3:		//Orientation only
-			eyePoses[0].Position = lastPoses[0].Position;
-			eyePoses[1].Position = lastPoses[1].Position;
-		//Else normal tracking
+			lastPoses[0].Orientation = eyePoses[0].Orientation;
+			lastPoses[1].Orientation = eyePoses[1].Orientation;
+			break;
+			//Else notracking
+		default:
+			break;
 		}
 		
 		int curIndex;
@@ -585,21 +592,23 @@ protected:
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, curTexId, 0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		ovr::for_each_eye([&](ovrEyeType eye) {
+			
 			const auto& vp = _sceneLayer.Viewport[eye];
 			glViewport(vp.Pos.x, vp.Pos.y, vp.Size.w, vp.Size.h);
 			_sceneLayer.RenderPose[eye] = eyePoses[eye];
+			
 			switch (viewSelector) {
 			case 0:		//Stereo
-				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
+				renderScene(_eyeProjections[eye], ovr::toGlm(lastPoses[eye]), eye, displaySelector);
 				break;
 			case 1:		//Mono
-				renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[ovrEye_Left]));
+				renderScene(_eyeProjections[eye], ovr::toGlm(lastPoses[ovrEye_Left]), ovrEye_Left, displaySelector);
 				break;
 			case 2:		//Left only
-				if (eye == ovrEye_Left) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
+				if (eye == ovrEye_Left) renderScene(_eyeProjections[eye], ovr::toGlm(lastPoses[eye]), ovrEye_Left, displaySelector);
 				break;
 			default:	//Right only
-				if (eye == ovrEye_Right) renderScene(_eyeProjections[eye], ovr::toGlm(eyePoses[eye]));
+				if (eye == ovrEye_Right) renderScene(_eyeProjections[eye], ovr::toGlm(lastPoses[eye]), ovrEye_Right, displaySelector);
 			}
 
 		});
@@ -622,14 +631,10 @@ protected:
 		ovrInputState inputState;
 		if (OVR_SUCCESS(ovr_GetInputState(_session, ovrControllerType_Touch, &inputState)))
 		{
-			/*if (inputState.HandTrigger[ovrHand_Right] > 0.5f)   cerr << "right middle trigger pressed" << endl;
-			if (inputState.IndexTrigger[ovrHand_Right] > 0.5f)	cerr << "right index trigger pressed" << endl;
-			if (inputState.HandTrigger[ovrHand_Left] > 0.5f)    cerr << "left middle trigger pressed" << endl;
-			if (inputState.IndexTrigger[ovrHand_Left] > 0.5f)	cerr << "left index trigger pressed" << endl;
-			if (inputState.Buttons>0) cerr << "Botton state:" << inputState.Buttons << endl;*/
+			
 
-			// On A press, change viewing mode
-			if (inputState.Buttons & ovrButton_A & !A_down) {
+			// On A press, change viewing mode			
+			if (inputState.Buttons & ovrButton_A && !A_down) {
 				A_down = true;
 				viewSelector = (viewSelector + 1)%4;	
 				printf("View mode: %d - %s\n", viewSelector, viewmodes[viewSelector]);
@@ -639,22 +644,44 @@ protected:
 			}
 			
 			// On B press, change head tracking mode
-			if (inputState.Buttons & ovrButton_B & !B_down) {
+			if (inputState.Buttons & ovrButton_B && !B_down) {
 				B_down = true;
-				if (trackingSelector == 0) {
-					ovr_GetEyePoses(_session, frame, true, _viewScaleDesc.HmdToEyeOffset, lastPoses, &_sceneLayer.SensorSampleTime);
-				}
 				trackingSelector = (trackingSelector + 1)%4;	
 				printf("Tracking mode: %d - %s\n", trackingSelector, trackmodes[trackingSelector]);
 			}
 			if (!(inputState.Buttons & ovrButton_B)) {
 				B_down = false;
 			}
-			// cse190: no need to print the above messages
+
+			// On X press, change head tracking mode
+			if (inputState.Buttons & ovrButton_X && !X_down) {
+				X_down = true;
+				displaySelector = (displaySelector + 1) % 3;
+				printf("Display mode: %d - %s\n", displaySelector, displaymodes[displaySelector]);
+			}
+			if (!(inputState.Buttons & ovrButton_X)) {
+				X_down = false;
+			}
+
+			// On right thumbstick movement, change IOD
+			if (inputState.Thumbstick[ovrHand_Right].x != 0) {
+				float tempL = _viewScaleDesc.HmdToEyeOffset[ovrEye_Left].x + (inputState.Thumbstick[ovrHand_Right].x * 0.01f);
+				float tempR = _viewScaleDesc.HmdToEyeOffset[ovrEye_Right].x - (inputState.Thumbstick[ovrHand_Right].x * 0.01f);
+				if (tempR - tempL >= 0 && tempR - tempL < 1.0f) {
+					_viewScaleDesc.HmdToEyeOffset[ovrEye_Left].x = tempL;
+					_viewScaleDesc.HmdToEyeOffset[ovrEye_Right].x = tempR;
+				}
+			}
+
+			// On right thumbstick press, reset IOD
+			if (inputState.Buttons & ovrButton_RThumb) {
+				_viewScaleDesc.HmdToEyeOffset[ovrEye_Left].x = originalIODL;
+				_viewScaleDesc.HmdToEyeOffset[ovrEye_Right].x = originalIODR;
+			}
 		}
 	}
 
-	virtual void renderScene(const glm::mat4 & projection, const glm::mat4 & headPose) = 0;
+	virtual void renderScene(const glm::mat4 & projection, const glm::mat4 & headPose, ovrEyeType eye, int displayMode) = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -778,13 +805,15 @@ struct ColorCubeScene {
 
 	GLuint shaderProg;
 	GLuint texture_box;
-	GLuint texture_skybox;
+	GLuint texture_skybox[2];
 	
 	unsigned char * imgData; 
 	int imgWidth;
 	int imgHeight;
 
 	Box * box;
+	float boxScale = 0.2f;
+
 	Box * skybox;
 
 	// VBOs for the cube's vertices and normals
@@ -809,30 +838,66 @@ public:
 		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/nx.ppm", imgWidth, imgHeight));
 		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/py.ppm", imgWidth, imgHeight));
 		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/ny.ppm", imgWidth, imgHeight));
-		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/nz.ppm", imgWidth, imgHeight));
 		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/pz.ppm", imgWidth, imgHeight));
-		texture_skybox = skybox->loadBoxTexture(skyboxDataVec, imgWidth, imgWidth);
+		skyboxDataVec.push_back(loadPPM("../Project2-Assets/left-ppm/nz.ppm", imgWidth, imgHeight));
+		texture_skybox[0] = skybox->loadBoxTexture(skyboxDataVec, imgWidth, imgWidth);
+
+		vector<unsigned char*> skyboxDataVec2;
+		skyboxDataVec2.push_back(loadPPM("../Project2-Assets/right-ppm/px.ppm", imgWidth, imgHeight));
+		skyboxDataVec2.push_back(loadPPM("../Project2-Assets/right-ppm/nx.ppm", imgWidth, imgHeight));
+		skyboxDataVec2.push_back(loadPPM("../Project2-Assets/right-ppm/py.ppm", imgWidth, imgHeight));
+		skyboxDataVec2.push_back(loadPPM("../Project2-Assets/right-ppm/ny.ppm", imgWidth, imgHeight));
+		skyboxDataVec2.push_back(loadPPM("../Project2-Assets/right-ppm/pz.ppm", imgWidth, imgHeight));
+		skyboxDataVec2.push_back(loadPPM("../Project2-Assets/right-ppm/nz.ppm", imgWidth, imgHeight));
+		texture_skybox[1] = skybox->loadBoxTexture(skyboxDataVec2, imgWidth, imgWidth);
 	}
 
-	void render(const mat4 & projection, const mat4 & modelview, ovrSession session) {
+	void render(const mat4 & projection, const mat4 & modelview, ovrSession session, ovrEyeType eye, int displayMode) {
 
-		glDepthMask(GL_FALSE);		
+		resizeBox(session);
+
 		glUseProgram(shaderProg);
-		//Draw Skybox		
-
+		
+		//Draw Skybox	
 		GLuint uProjection = glGetUniformLocation(shaderProg, "projection");
 		GLuint uModelview = glGetUniformLocation(shaderProg, "modelview");
 		GLuint uTransform = glGetUniformLocation(shaderProg, "transform");
 		glUniformMatrix4fv(uProjection, 1, GL_FALSE, (&projection[0][0]));
 		glUniformMatrix4fv(uModelview, 1, GL_FALSE, &(modelview[0][0]));
-		skybox->draw(shaderProg, texture_skybox);
-		glDepthMask(GL_TRUE);
 
-		glm::mat4 boxtransform;
-		boxtransform = glm::translate(boxtransform, glm::vec3(0.0f, 0.f, -1.0f));
-		boxtransform = glm::scale(boxtransform, glm::vec3(0.2f));		
-		glUniformMatrix4fv(uTransform, 1, GL_FALSE, &boxtransform[0][0]);
-		box->draw(shaderProg, texture_box);
+		if (displayMode != 0) {
+			glDepthMask(GL_FALSE);
+			glm::mat4 skyboxTransform = glm::scale(glm::mat4(1.0f), glm::vec3(20.0f));
+			glUniformMatrix4fv(uTransform, 1, GL_FALSE, &(skyboxTransform[0][0]));
+			skybox->draw(shaderProg, texture_skybox[eye]);
+			glDepthMask(GL_TRUE);
+		}		
+
+		if (displayMode != 1) {
+			glm::mat4 boxtransform;
+			boxtransform = glm::translate(boxtransform, glm::vec3(0.0f, 0.f, -1.0f));
+			boxtransform = glm::scale(boxtransform, glm::vec3(boxScale));
+			glUniformMatrix4fv(uTransform, 1, GL_FALSE, &(boxtransform[0][0]));
+			box->draw(shaderProg, texture_box);
+		}
+	}
+
+	void resizeBox(ovrSession session) {
+		ovrInputState inputState;
+		if (OVR_SUCCESS(ovr_GetInputState(session, ovrControllerType_Touch, &inputState)))
+		{
+			// On left thumbstick movement, change box size
+			if (inputState.Thumbstick[ovrHand_Left].x != 0) {
+				float temp = boxScale + (inputState.Thumbstick[ovrHand_Left].x * 0.01f);
+				if (temp > 0.01f && temp < 1.0f)
+					boxScale += (inputState.Thumbstick[ovrHand_Left].x * 0.01f);
+			}
+
+			// On left thumbstick press, reset box size
+			if (inputState.Buttons & ovrButton_LThumb) {
+				boxScale = 0.2f;
+			}
+		}
 	}
 };
 
@@ -848,7 +913,7 @@ public:
 protected:
 	void initGl() override {
 		RiftApp::initGl();
-		glClearColor(0.2f, 0.2f, 0.2f, 0.0f);
+		glClearColor(0, 0, 0, 0);
 		glEnable(GL_DEPTH_TEST);
 		ovr_RecenterTrackingOrigin(_session);
 		cubeScene = std::shared_ptr<ColorCubeScene>(new ColorCubeScene());
@@ -858,8 +923,8 @@ protected:
 		cubeScene.reset();
 	}
 
-	void renderScene(const glm::mat4 & projection, const glm::mat4 & headPose) override {
-		cubeScene->render(projection, glm::inverse(headPose), _session);
+	void renderScene(const glm::mat4 & projection, const glm::mat4 & headPose, ovrEyeType eye, int displaymode) override {
+		cubeScene->render(projection, glm::inverse(headPose), _session, eye, displaymode);
 	}
 };
 
